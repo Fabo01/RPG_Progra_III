@@ -121,6 +121,56 @@ class ColaServicio:
         
         return personaje_mision
     
+    def desencolar_mision_especifica(self, personaje_id: int, mision_id: int, es_principal: bool = False):
+        """
+        Elimina una misión específica de la cola del personaje, independiente de su posición.
+        Útil para eliminar asignaciones de misiones cuando se quiere eliminar la misión.
+        
+        Args:
+            personaje_id: ID del personaje dueño de la cola
+            mision_id: ID de la misión a eliminar de la cola
+            es_principal: True si se trata de la cola principal, False si es la secundaria
+            
+        Returns:
+            La relación PersonajesMisiones que fue eliminada o None si no se encontró
+            
+        Raises:
+            ColaVaciaError: Si la cola está vacía
+            MisionNoEncontradaError: Si la misión no se encuentra en la cola
+        """
+        tipo_cola = 'principal' if es_principal else 'secundaria'
+        
+        # Obtenemos la cola
+        cola_tda = self.obtener_cola_personaje(personaje_id, tipo_cola)
+        
+        # Verificamos si la cola está vacía
+        if cola_tda.is_empty():
+            raise ColaVaciaError(f"La cola {tipo_cola} del personaje {personaje_id} está vacía")
+        
+        # Creamos una nueva cola para guardar las misiones que no vamos a eliminar
+        nueva_cola = TDA_Cola()
+        mision_eliminada = None
+        
+        # Iteramos por las misiones para encontrar la que queremos eliminar
+        for _ in range(cola_tda.size()):
+            mision = cola_tda.dequeue()
+            if mision.mision_id == mision_id:
+                mision_eliminada = mision
+            else:
+                nueva_cola.enqueue(mision)
+        
+        # Si no encontramos la misión, lanzamos una excepción
+        if not mision_eliminada:
+            # Restauramos la cola original
+            while not nueva_cola.is_empty():
+                cola_tda.enqueue(nueva_cola.dequeue())
+            raise MisionNoEncontradaError(f"La misión {mision_id} no está en la cola {tipo_cola} del personaje {personaje_id}")
+        
+        # Guardamos la nueva cola actualizada (sin la misión eliminada)
+        self.guardar_cola_personaje(personaje_id, tipo_cola, nueva_cola)
+        
+        return mision_eliminada
+    
     def obtener_primera_mision(self, personaje_id: int, es_principal: bool = False):
         """
         Retorna la primera misión de la cola sin eliminarla.

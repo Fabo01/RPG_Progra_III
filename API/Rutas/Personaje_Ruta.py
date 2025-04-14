@@ -11,7 +11,7 @@ from API.DTOs.Personaje_DTO import (
 from API.DTOs.Mision_DTO import MisionRespuesta
 from Servicios.Personaje_Serv import PersonajeServicio
 from Servicios.Mision_Serv import MisionServicio
-from Utilidades.Excepciones import PersonajeNoEncontradoError, MisionNoEncontradaError
+from Utilidades.Excepciones import PersonajeNoEncontradoError, MisionNoEncontradaError, ColaVaciaError
 
 router = APIRouter(
     prefix="/personajes",
@@ -76,21 +76,41 @@ def eliminar_personaje(personaje_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=str(e))
 
 @router.post("/{personaje_id}/completar")
-def completar_primera_mision(personaje_id: int, db: Session = Depends(get_db)):
+def completar_primera_mision(personaje_id: int, tipo_cola: str = None, db: Session = Depends(get_db)):
     """
-    Completa la primera misión en la cola del personaje (desencola + suma XP)
+    Completa la primera misión en la cola especificada del personaje.
+    Si no se especifica tipo_cola, se intenta primero con la cola principal y luego con la secundaria.
+    
+    - tipo_cola: "principal" o "secundaria"
     """
     # Servicios necesarios
     personaje_servicio = PersonajeServicio(db)
     mision_servicio = MisionServicio(db)
     
     try:
-        # 1. Obtener la primera misión de la cola principal
+        # Importamos el servicio de cola
         from Servicios.Cola_Serv import ColaServicio
         cola_servicio = ColaServicio(db)
         
-        # Intentar primero con la cola principal
-        try:
+        # Verificar tipo de cola especificado
+        if tipo_cola and tipo_cola not in ["principal", "secundaria"]:
+            raise HTTPException(
+                status_code=400, 
+                detail="El tipo de cola debe ser 'principal' o 'secundaria'"
+            )
+        
+        # Si se especifica el tipo de cola, usamos esa
+        if tipo_cola:
+            es_principal = tipo_cola == "principal"
+            primera_mision = cola_servicio.obtener_primera_mision(personaje_id, es_principal)
+            
+            if not primera_mision:
+                raise HTTPException(
+                    status_code=404, 
+                    detail=f"El personaje no tiene misiones pendientes en la cola {tipo_cola}"
+                )
+        else:
+            # Comportamiento anterior: intentar primero con la cola principal
             cola_tipo = "principal"
             primera_mision = cola_servicio.obtener_primera_mision(personaje_id, es_principal=True)
             if not primera_mision:
@@ -101,18 +121,27 @@ def completar_primera_mision(personaje_id: int, db: Session = Depends(get_db)):
             if not primera_mision:
                 raise HTTPException(status_code=404, detail="El personaje no tiene misiones pendientes en ninguna cola")
             
-            mision_id = primera_mision.mision_id
-            
-            # 2. Completar la misión
-            es_principal = cola_tipo == "principal"
+            tipo_cola = cola_tipo
+        
+        # Obtener el ID de la misión y si es principal
+        mision_id = primera_mision.mision_id
+        es_principal = tipo_cola == "principal"
+        
+        try:
+            # Completar la misión
             mision_desencolada = cola_servicio.desencolar_mision(personaje_id, es_principal)
             
-            # 3. Actualizar estado y dar recompensas
+            # Actualizar estado y dar recompensas
             mision_servicio.personaje_mision_repo.actualizar_estado(personaje_id, mision_id, 'completada')
             resultado = personaje_servicio.otorgar_recompensas_mision(personaje_id, mision_id)
             
-            return resultado
+            return {
+                "mensaje": f"Misión {mision_id} completada con éxito de la cola {tipo_cola}",
+                "recompensas": resultado
+            }
             
+        except ColaVaciaError as e:
+            raise HTTPException(status_code=404, detail=str(e))
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Error al completar la misión: {str(e)}")
         

@@ -17,7 +17,6 @@ class MisionServicio:
         # Convertir DTO a dict para crear misión
         mision_data = mision_dto.dict()
         mision_data['fecha_creacion'] = datetime.now()
-        mision_data['estado'] = 'pendiente'
         
         return self.mision_repo.crear_mision(mision_data)
     
@@ -34,7 +33,38 @@ class MisionServicio:
         return self.mision_repo.actualizar_mision(mision_id, mision_dto.dict(exclude_unset=True))
     
     def eliminar_mision(self, mision_id):
-        """Elimina una misión"""
+        """
+        Elimina una misión y todas sus relaciones con personajes.
+        
+        Primero elimina todas las relaciones de la misión con personajes en la tabla intermedia
+        y la desencola de todas las colas de personajes, para luego eliminar la misión.
+        """
+        # 1. Verificar que la misión existe
+        mision = self.mision_repo.obtener_mision_por_id(mision_id)
+        
+        # 2. Obtener todos los personajes que tienen esta misión asignada
+        relaciones = self.personaje_mision_repo.obtener_personajes_por_mision(mision_id)
+        
+        # 3. Para cada personaje, intentar desencolar la misión y eliminar la relación
+        for relacion in relaciones:
+            personaje_id = relacion.personaje_id
+            es_principal = mision.categoria == 'principal'
+            
+            # Intentar desencolar de ambas colas (principal y secundaria) por si acaso
+            try:
+                self.cola_servicio.desencolar_mision_especifica(personaje_id, mision_id, es_principal)
+            except:
+                pass
+                
+            try:
+                self.cola_servicio.desencolar_mision_especifica(personaje_id, mision_id, not es_principal)
+            except:
+                pass
+                
+            # Eliminar la relación en la tabla intermedia
+            self.personaje_mision_repo.eliminar_asignacion(personaje_id, mision_id)
+        
+        # 4. Una vez eliminadas todas las relaciones, eliminar la misión
         return self.mision_repo.eliminar_mision(mision_id)
     
     def obtener_misiones_por_tipo(self, tipo, skip=0, limit=100):

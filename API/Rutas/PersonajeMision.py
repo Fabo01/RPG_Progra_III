@@ -119,3 +119,36 @@ def obtener_personajes_por_mision(
         return servicio.obtener_personajes_por_mision(mision_id, estado)
     except MisionNoEncontradaError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+@router.delete("/desasignar/{mision_id}/de/{personaje_id}")
+def eliminar_asignacion_mision(mision_id: int, personaje_id: int, db: Session = Depends(get_db)):
+    """
+    Elimina la asignación de una misión a un personaje.
+    Esto permite eliminar posteriormente la misión sin restricciones de clave foránea.
+    """
+    servicio = MisionServicio(db)
+    try:
+        # Primero intentar desencolar la misión si está en alguna cola
+        mision = servicio.mision_repo.obtener_mision_por_id(mision_id)
+        es_principal = mision.categoria == 'principal'
+        
+        try:
+            # Intentamos desencolar la misión en ambas colas (principal y secundaria)
+            # No nos preocupamos si esta operación falla porque la misión podría no estar encolada
+            servicio.cola_servicio.desencolar_mision_especifica(personaje_id, mision_id, es_principal)
+        except Exception:
+            pass
+            
+        try:
+            # También intentamos en la otra cola por si acaso
+            servicio.cola_servicio.desencolar_mision_especifica(personaje_id, mision_id, not es_principal)
+        except Exception:
+            pass
+            
+        # Ahora eliminar la relación en la tabla intermedia
+        resultado = servicio.personaje_mision_repo.eliminar_asignacion(personaje_id, mision_id)
+        return resultado
+    except MisionNoEncontradaError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error al eliminar la asignación: {str(e)}")

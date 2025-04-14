@@ -2,13 +2,13 @@ from pydantic import BaseModel, Field, validator
 from typing import Optional
 
 class PersonajeBase(BaseModel):
-    nombre: str = Field(..., min_length=3, max_length=50)
+    nombre: str = Field(..., min_length=2, max_length=50)
 
 class PersonajeCreacion(PersonajeBase):
     pass
 
 class PersonajeActualizacion(BaseModel):
-    nombre: Optional[str] = Field(None, min_length=3, max_length=50)
+    nombre: Optional[str] = Field(None, min_length=2, max_length=50)
 
 class PersonajeRespuesta(PersonajeBase):
     id: int
